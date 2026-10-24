@@ -1,0 +1,34 @@
+# Compilación
+build/
+*.o
+*.d
+*.a
+*.so
+*.out
+
+# Credenciales y configuración local (nunca se suben)
+.env
+.env.*
+!.env.example
+
+# Volcados y datos locales de la base de datos
+*.sql.gz
+*.dump
+
+# Depuración y análisis
+core
+core.*
+*.log
+*.tsan
+compile_commands.json
+.cache/
+
+# Editores e IDEs
+.vscode/
+.idea/
+*.swp
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

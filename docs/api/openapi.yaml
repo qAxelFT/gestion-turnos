@@ -1,0 +1,304 @@
+openapi: 3.0.3
+info:
+  title: API del Gestor de turnos para servicios de salud
+  version: 0.1.0
+  description: >
+    API REST para consultar horarios, reservar y cancelar citas médicas.
+    La reserva es segura ante acceso simultáneo: si varios clientes piden el
+    mismo slot a la vez, solo uno recibe 201 y los demás reciben 409.
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8080
+    description: Servidor local
+tags:
+  - name: Salud
+  - name: Médicos
+  - name: Pacientes
+  - name: Citas
+  - name: Agenda
+paths:
+  /api/salud:
+    get:
+      tags: [Salud]
+      summary: Comprueba que el servidor responde
+      responses:
+        "200":
+          description: Servidor activo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+  /api/medicos:
+    get:
+      tags: [Médicos]
+      summary: Lista los médicos activos
+      responses:
+        "200":
+          description: Lista de médicos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Medico" }
+    post:
+      tags: [Médicos]
+      summary: Registra un médico
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MedicoNuevo" }
+      responses:
+        "201":
+          description: Médico creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Medico" }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+  /api/medicos/{id}/slots:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Médicos]
+      summary: Horarios de un médico en una fecha
+      parameters:
+        - name: fecha
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          example: "2026-11-02"
+      responses:
+        "200":
+          description: Slots del médico en la fecha, ordenados por hora
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Slot" }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+    post:
+      tags: [Médicos]
+      summary: Genera los slots de una jornada
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenerarSlots" }
+      responses:
+        "201":
+          description: Slots creados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  creados: { type: integer, example: 16 }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: Ya existen slots que se traslapan con la jornada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/pacientes:
+    post:
+      tags: [Pacientes]
+      summary: Registra un paciente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PacienteNuevo" }
+      responses:
+        "201":
+          description: Paciente creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Paciente" }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+        "409":
+          description: Ya existe un paciente con ese correo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/pacientes/{id}/citas:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Pacientes]
+      summary: Citas de un paciente
+      responses:
+        "200":
+          description: Citas del paciente, de la más próxima a la más lejana
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CitaDetalle" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+  /api/citas:
+    post:
+      tags: [Citas]
+      summary: Reserva un slot
+      description: >
+        Operación protegida contra concurrencia (mutex por slot y transacción
+        con bloqueo de fila). Con N peticiones simultáneas sobre el mismo slot,
+        exactamente una recibe 201.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CitaNueva" }
+      responses:
+        "201":
+          description: Cita confirmada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cita" }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: El slot ya fue reservado por otra persona
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example:
+                error: slot_ocupado
+                mensaje: El horario ya fue reservado por otra persona.
+  /api/citas/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [Citas]
+      summary: Cancela una cita y libera el slot
+      responses:
+        "204":
+          description: Cita cancelada
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: La cita ya estaba cancelada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/agenda:
+    get:
+      tags: [Agenda]
+      summary: Agenda del día de todos los médicos
+      parameters:
+        - name: fecha
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          example: "2026-11-02"
+      responses:
+        "200":
+          description: Slots del día con el paciente, si están reservados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AgendaItem" }
+        "400": { $ref: "#/components/responses/SolicitudInvalida" }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  responses:
+    SolicitudInvalida:
+      description: Datos faltantes o con formato incorrecto
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NoEncontrado:
+      description: El recurso no existe
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error, mensaje]
+      properties:
+        error: { type: string, example: no_encontrado }
+        mensaje: { type: string }
+    Medico:
+      type: object
+      properties:
+        id: { type: integer, example: 3 }
+        nombre: { type: string, example: Dra. Laura Méndez }
+        especialidad: { type: string, example: Medicina general }
+    MedicoNuevo:
+      type: object
+      required: [nombre, especialidad_id]
+      properties:
+        nombre: { type: string }
+        especialidad_id: { type: integer }
+    Slot:
+      type: object
+      properties:
+        id: { type: integer, example: 42 }
+        medico_id: { type: integer, example: 3 }
+        inicio: { type: string, format: date-time, example: "2026-11-02T10:00:00" }
+        fin: { type: string, format: date-time, example: "2026-11-02T10:30:00" }
+        estado: { type: string, enum: [libre, reservado] }
+    GenerarSlots:
+      type: object
+      required: [fecha, hora_inicio, hora_fin, duracion_min]
+      properties:
+        fecha: { type: string, format: date, example: "2026-11-02" }
+        hora_inicio: { type: string, example: "09:00" }
+        hora_fin: { type: string, example: "13:00" }
+        duracion_min: { type: integer, minimum: 5, example: 30 }
+    Paciente:
+      type: object
+      properties:
+        id: { type: integer, example: 7 }
+        nombre: { type: string, example: Ana Torres }
+        email: { type: string, format: email }
+        telefono: { type: string, nullable: true }
+    PacienteNuevo:
+      type: object
+      required: [nombre, email]
+      properties:
+        nombre: { type: string }
+        email: { type: string, format: email }
+        telefono: { type: string }
+    CitaNueva:
+      type: object
+      required: [slot_id, paciente_id]
+      properties:
+        slot_id: { type: integer, example: 42 }
+        paciente_id: { type: integer, example: 7 }
+    Cita:
+      type: object
+      properties:
+        id: { type: integer, example: 120 }
+        slot_id: { type: integer, example: 42 }
+        paciente_id: { type: integer, example: 7 }
+        estado: { type: string, enum: [activa, cancelada] }
+        creada_en: { type: string, format: date-time }
+    CitaDetalle:
+      type: object
+      properties:
+        id: { type: integer }
+        estado: { type: string, enum: [activa, cancelada] }
+        medico: { type: string }
+        inicio: { type: string, format: date-time }
+        fin: { type: string, format: date-time }
+    AgendaItem:
+      type: object
+      properties:
+        slot_id: { type: integer }
+        medico: { type: string }
+        inicio: { type: string, format: date-time }
+        fin: { type: string, format: date-time }
+        estado: { type: string, enum: [libre, reservado] }
+        paciente: { type: string, nullable: true }
